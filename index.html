@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ball Battle</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      color: #fff;
+    }
+
+    /* ── SELECTION SCREEN ── */
+    #select-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+
+    #select-screen h1 {
+      font-size: 2.2rem;
+      letter-spacing: 5px;
+      text-transform: uppercase;
+    }
+
+    #select-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 40px;
+    }
+
+    .player-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .player-title {
+      font-size: 1.2rem;
+      font-weight: bold;
+      letter-spacing: 3px;
+    }
+    .player-title.red  { color: #e74c3c; }
+    .player-title.blue { color: #3498db; }
+
+    .role-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 162px);
+      gap: 9px;
+    }
+
+    .role-card {
+      background: #1c1c1c;
+      border: 2px solid #2e2e2e;
+      border-radius: 8px;
+      padding: 11px 13px;
+      cursor: pointer;
+      transition: border-color 0.12s, background 0.12s;
+      user-select: none;
+    }
+    .role-card:hover { background: #262626; border-color: #444; }
+    .role-card.sel-red  { border-color: #e74c3c; background: #2a1212; }
+    .role-card.sel-blue { border-color: #3498db; background: #0e1e2c; }
+
+    .role-name { font-size: 0.95rem; font-weight: bold; margin-bottom: 4px; }
+    .role-desc { font-size: 0.7rem; color: #777; line-height: 1.4; }
+
+    #vs-label {
+      font-size: 1.6rem;
+      font-weight: bold;
+      color: #333;
+      align-self: center;
+    }
+
+    #start-btn {
+      padding: 13px 38px;
+      font-size: 0.95rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      border: none;
+      border-radius: 28px;
+      cursor: pointer;
+      background: #e74c3c;
+      color: #fff;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    #start-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    #start-btn:not(:disabled):hover { transform: scale(1.04); }
+
+    /* ── GAME SCREEN ── */
+    #game-screen { display: none; }
+
+    #game-wrapper { position: relative; }
+
+    canvas {
+      display: block;
+      border: 2px solid #2a2a2a;
+      background: #111;
+    }
+
+    #overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.78);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+    }
+    #overlay.visible { display: flex; }
+
+    #winner-text { font-size: 2.4rem; font-weight: bold; letter-spacing: 2px; }
+
+    .o-btn {
+      padding: 10px 26px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      letter-spacing: 1px;
+      border: none;
+      border-radius: 22px;
+      cursor: pointer;
+      background: #eee;
+      color: #111;
+    }
+    .o-btn:hover { background: #fff; }
+  </style>
+</head>
+<body>
+
+<!-- SELECTION SCREEN -->
+<div id="select-screen">
+  <h1>Ball Battle</h1>
+  <div id="select-row">
+    <div class="player-section">
+      <div class="player-title red">RED</div>
+      <div class="role-grid" id="grid-red"></div>
+    </div>
+    <div id="vs-label">VS</div>
+    <div class="player-section">
+      <div class="player-title blue">BLUE</div>
+      <div class="role-grid" id="grid-blue"></div>
+    </div>
+  </div>
+  <button id="start-btn" disabled>SELECT BOTH ROLES TO FIGHT</button>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="game-screen">
+  <div id="game-wrapper">
+    <canvas id="gameCanvas" width="860" height="480"></canvas>
+    <div id="overlay">
+      <div id="winner-text"></div>
+      <button class="o-btn" id="play-again">PLAY AGAIN</button>
+      <button class="o-btn" id="change-roles">CHANGE ROLES</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── ROLE DEFINITIONS ──
+const ROLES = [
+  { id: 'normal',    name: 'Normal',    desc: '110 HP. No ability — rewarded with extra health.' },
+  { id: 'shadow',    name: 'Shadow',    desc: '90 HP. Phases invisible & invincible for 1.5s every 6s.' },
+  { id: 'wukong',    name: 'Wukong',    desc: '110 HP. Spawns 3 damage-dealing clones. HP hidden while clones are active.' },
+  { id: 'death',     name: 'Death',     desc: '120 HP. Drains 3 HP every 0.6s from opponents within 80px.' },
+  { id: 'laser',     name: 'Laser',     desc: '85 HP. Fires a cross beam every 4s for 25 damage.' },
+  { id: 'tank',      name: 'Tank',      desc: '140 HP. Deals 18 collision damage. Large hitbox.' },
+  { id: 'ghost',     name: 'Ghost',     desc: '90 HP. Passes through walls instead of bouncing — unpredictable.' },
+  { id: 'vampire',   name: 'Vampire',   desc: '100 HP. Heals 8 HP from every collision hit.' },
+  { id: 'bomb',      name: 'Bomb',      desc: '105 HP. Explodes every 5s — 30 damage within 80px range.' },
+  { id: 'berserker', name: 'Berserker', desc: '90 HP. Collision damage rises from 10 to 30 as HP decreases.' },
+];
+
+const SPEED = 3.5;
+
+const ROLE_CFG = {
+  normal:    { hp: 110, radius: 20, colDmg: 10 },
+  shadow:    { hp: 90,  radius: 20, colDmg: 10 },
+  wukong:    { hp: 110, radius: 20, colDmg: 10 },
+  death:     { hp: 120, radius: 20, colDmg: 10 },
+  laser:     { hp: 85,  radius: 18, colDmg: 10 },
+  tank:      { hp: 140, radius: 26, colDmg: 18 },
+  ghost:     { hp: 90,  radius: 20, colDmg: 10 },
+  vampire:   { hp: 100, radius: 20, colDmg: 10 },
+  bomb:      { hp: 105, radius: 20, colDmg: 10 },
+  berserker: { hp: 90,  radius: 20, colDmg: 10 },
+};
+
+// ── SELECTION UI ──
+const chosen = { red: null, blue: null };
+
+function buildGrid(pid) {
+  const grid = document.getElementById('grid-' + pid);
+  ROLES.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'role-card';
+    card.dataset.role = r.id;
+    card.innerHTML = `<div class="role-name">${r.name}</div><div class="role-desc">${r.desc}</div>`;
+    card.addEventListener('click', () => {
+      chosen[pid] = r.id;
+      grid.querySelectorAll('.role-card').forEach(c => c.classList.remove('sel-' + pid));
+      card.classList.add('sel-' + pid);
+      const btn = document.getElementById('start-btn');
+      if (chosen.red && chosen.blue) { btn.disabled = false; btn.textContent = 'FIGHT!'; }
+    });
+    grid.appendChild(card);
+  });
+}
+buildGrid('red');
+buildGrid('blue');
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('play-again').addEventListener('click', () => {
+  document.getElementById('overlay').classList.remove('visible');
+  ball1.reset(); ball2.reset();
+  particles.length = 0; shockwaves.length = 0; damageNumbers.length = 0; shakeAmount = 0;
+  state = 'playing'; lastTime = 0;
+  requestAnimationFrame(gameLoop);
+});
+document.getElementById('change-roles').addEventListener('click', () => {
+  document.getElementById('overlay').classList.remove('visible');
+  document.getElementById('game-screen').style.display = 'none';
+  document.getElementById('select-screen').style.display = 'flex';
+  chosen.red = null; chosen.blue = null;
+  document.querySelectorAll('.role-card').forEach(c => c.classList.remove('sel-red','sel-blue'));
+  const btn = document.getElementById('start-btn');
+  btn.disabled = true; btn.textContent = 'SELECT BOTH ROLES TO FIGHT';
+});
+
+// ── CANVAS & HELPERS ──
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+function randVel(speed) {
+  const a = Math.random() * Math.PI * 2;
+  return [Math.cos(a) * speed, Math.sin(a) * speed];
+}
+
+// ── BALL CLASS ──
+class Ball {
+  constructor(sx, sy, color, name, role) {
+    this.startX = sx; this.startY = sy;
+    this.color = color; this.name = name; this.role = role;
+    const c = ROLE_CFG[role];
+    this.maxHp = c.hp; this.radius = c.radius;
+    this.speed = SPEED; this.colDmg = c.colDmg;
+    this.reset();
+  }
+
+  reset() {
+    this.x = this.startX; this.y = this.startY;
+    [this.vx, this.vy] = randVel(this.speed);
+    this.hp = this.maxHp;
+    this.alive = true; this.scale = 1;
+    this.hitFlash = 0; this.healFlash = 0; this.colCooldown = 0;
+    this.trail = [];
+    // ability timers
+    this.shadowCycle  = 2500;  this.phased = false;
+    this.cloneTimer   = 3500;  this.clones = [];  // first wave at 3.5s
+    this.auraTimer    = 600;
+    this.laserTimer   = 3000;  this.laserActive = false;
+    this.laserDur     = 0;     this.laserX = 0; this.laserY = 0;
+    this.laserHitCD   = 0;
+    // Bomb
+    this.bombTimer    = 5000;  this.bombWarning = false;
+    this.bombWarnTimer = 0;    this.bombExploding = false; this.bombExplodeDur = 0;
+  }
+
+  takeDamage(amount) {
+    if (!this.alive) return;
+    if (this.role === 'shadow' && this.phased) return;
+    this.hp = Math.max(0, this.hp - amount);
+    this.hitFlash = 1.0;
+    spawnDamageNumber(this.x + (Math.random()-0.5)*20, this.y - this.radius - 6, `-${amount}`, '#ff7070');
+    if (this.hp === 0) this.alive = false;
+  }
+
+  gainHp(amount) {
+    if (!this.alive) return;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+    this.healFlash = 1.0;
+    spawnDamageNumber(this.x + (Math.random()-0.5)*20, this.y - this.radius - 6, `+${amount}`, '#55ee88');
+  }
+
+  update(other, dt) {
+    if (!this.alive) return;
+    // Record trail before moving
+    this.trail.unshift({ x: this.x, y: this.y });
+    if (this.trail.length > 8) this.trail.pop();
+
+    if (this.hitFlash  > 0) this.hitFlash  = Math.max(0, this.hitFlash - dt / 220);
+    if (this.healFlash > 0) this.healFlash = Math.max(0, this.healFlash - dt / 300);
+    if (this.colCooldown > 0) this.colCooldown -= dt;
+
+    // Berserker: emit sparks at low HP
+    if (this.role === 'berserker' && this.hp < this.maxHp * 0.5 && Math.random() < 0.08) {
+      spawnParticles(this.x + (Math.random()-0.5)*this.radius, this.y + (Math.random()-0.5)*this.radius, '#ff4400', 1);
+    }
+
+    // Shadow: phase cycle — 1.5s phased / 6s total = 25% uptime
+    if (this.role === 'shadow') {
+      this.shadowCycle = (this.shadowCycle + dt) % 6000;
+      this.phased = this.shadowCycle < 1500;
+    }
+
+    // Wukong: spawn 3 damage-dealing clones every 4s
+    if (this.role === 'wukong') {
+      this.cloneTimer -= dt;
+      if (this.cloneTimer <= 0) {
+        for (let i = 0; i < 3; i++) {
+          const a = Math.random() * Math.PI * 2;
+          this.clones.push({ x: this.x, y: this.y,
+            vx: Math.cos(a)*this.speed, vy: Math.sin(a)*this.speed, life: 4000 });
+        }
+        this.cloneTimer = 4000;
+      }
+      for (let i = this.clones.length - 1; i >= 0; i--) {
+        const c = this.clones[i];
+        c.x += c.vx; c.y += c.vy;
+        if (c.x - this.radius < 0)  { c.x = this.radius;     c.vx =  Math.abs(c.vx); }
+        else if (c.x + this.radius > W) { c.x = W-this.radius; c.vx = -Math.abs(c.vx); }
+        if (c.y - this.radius < 0)  { c.y = this.radius;     c.vy =  Math.abs(c.vy); }
+        else if (c.y + this.radius > H) { c.y = H-this.radius; c.vy = -Math.abs(c.vy); }
+        c.life -= dt;
+        if (c.life <= 0) this.clones.splice(i, 1);
+      }
+    }
+
+    // Death: aura drain — 3 dmg / 600ms within 80px
+    if (this.role === 'death') {
+      this.auraTimer -= dt;
+      if (this.auraTimer <= 0) {
+        if (Math.hypot(other.x - this.x, other.y - this.y) < 80) other.takeDamage(3);
+        this.auraTimer = 600;
+      }
+    }
+
+    // Laser: cross beam every 4s, lasts 2s, 25 damage
+    if (this.role === 'laser') {
+      if (this.laserHitCD > 0) this.laserHitCD -= dt;
+      this.laserTimer -= dt;
+      if (this.laserTimer <= 0) {
+        this.laserActive = true; this.laserDur = 2000;
+        this.laserX = this.x;   this.laserY = this.y;
+        this.laserTimer = 4000; this.laserHitCD = 0;
+      }
+      if (this.laserActive) {
+        this.laserDur -= dt;
+        if (this.laserDur <= 0) { this.laserActive = false; }
+        else if (this.laserHitCD <= 0) {
+          const hitH = Math.abs(other.y - this.laserY) <= other.radius + 3;
+          const hitV = Math.abs(other.x - this.laserX) <= other.radius + 3;
+          if (hitH || hitV) {
+            other.takeDamage(25);
+            spawnShockwave(other.x, other.y, 45, '#ffa500');
+            triggerShake(5);
+            this.laserHitCD = 700;
+          }
+        }
+      }
+    }
+
+    // Bomb: charge → warn → explode
+    if (this.role === 'bomb') {
+      this.bombTimer -= dt;
+      if (this.bombTimer <= 0 && !this.bombWarning) {
+        this.bombWarning = true; this.bombWarnTimer = 600;
+      }
+      if (this.bombWarning) {
+        this.bombWarnTimer -= dt;
+        if (this.bombWarnTimer <= 0) {
+          this.bombWarning = false; this.bombTimer = 5000;
+          this.bombExploding = true; this.bombExplodeDur = 350;
+          spawnParticles(this.x, this.y, '#ff6600', 18);
+          spawnShockwave(this.x, this.y, 90, '#ff8800');
+          triggerShake(12);
+          if (Math.hypot(other.x - this.x, other.y - this.y) < 80) {
+            other.takeDamage(30);
+          }
+        }
+      }
+      if (this.bombExploding) {
+        this.bombExplodeDur -= dt;
+        if (this.bombExplodeDur <= 0) this.bombExploding = false;
+      }
+    }
+
+    // Move
+    this.x += this.vx; this.y += this.vy;
+    if (this.role === 'ghost') {
+      if (this.x + this.radius < 0)      this.x = W + this.radius;
+      else if (this.x - this.radius > W)  this.x = -this.radius;
+      if (this.y + this.radius < 0)      this.y = H + this.radius;
+      else if (this.y - this.radius > H)  this.y = -this.radius;
+    } else {
+      if (this.x - this.radius < 0)  { this.x = this.radius;     this.vx =  Math.abs(this.vx); spawnParticles(this.x, this.y, this.color, 4); }
+      else if (this.x + this.radius > W) { this.x = W-this.radius; this.vx = -Math.abs(this.vx); spawnParticles(this.x, this.y, this.color, 4); }
+      if (this.y - this.radius < 0)  { this.y = this.radius;     this.vy =  Math.abs(this.vy); spawnParticles(this.x, this.y, this.color, 4); }
+      else if (this.y + this.radius > H) { this.y = H-this.radius; this.vy = -Math.abs(this.vy); spawnParticles(this.x, this.y, this.color, 4); }
+    }
+
+    // Keep speed constant every frame
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd > 0) { this.vx = (this.vx / spd) * SPEED; this.vy = (this.vy / spd) * SPEED; }
+  }
+
+  draw(ctx) {
+    if (!this.alive) return;
+    const r = this.radius * this.scale;
+
+    // Bomb: warning ring and explosion flash
+    if (this.role === 'bomb') {
+      if (this.bombWarning) {
+        const t = 1 - this.bombWarnTimer / 600;
+        ctx.save();
+        ctx.strokeStyle = `rgba(255,100,0,${0.4 + t * 0.55})`;
+        ctx.lineWidth = 2 + t * 2;
+        ctx.beginPath(); ctx.arc(this.x, this.y, 40 + t * 40, 0, Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+      if (this.bombExploding) {
+        const t = 1 - this.bombExplodeDur / 350;
+        ctx.save();
+        ctx.globalAlpha = (1 - t) * 0.65;
+        ctx.fillStyle = '#ff6600';
+        ctx.beginPath(); ctx.arc(this.x, this.y, 20 + t * 80, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Death aura (matches actual 80px drain range)
+    if (this.role === 'death') {
+      const pulse = 0.07 + 0.04 * Math.sin(Date.now() / 350);
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = '#7b00a0';
+      ctx.beginPath(); ctx.arc(this.x, this.y, 80, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+
+    // Laser beam
+    if (this.role === 'laser' && this.laserActive) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.laserDur / 400);
+      ctx.strokeStyle = '#ffa500'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, this.laserY); ctx.lineTo(W, this.laserY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(this.laserX, 0); ctx.lineTo(this.laserX, H); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Wukong clones
+    if (this.role === 'wukong') {
+      for (const c of this.clones) {
+        ctx.save();
+        ctx.globalAlpha = (c.life / 3000) * 0.45;
+        ctx.fillStyle = this.color;
+        ctx.beginPath(); ctx.arc(c.x, c.y, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // Trail
+    for (let i = this.trail.length - 1; i >= 0; i--) {
+      const t = this.trail[i];
+      const frac = (this.trail.length - i) / this.trail.length;
+      ctx.save();
+      ctx.globalAlpha = frac * 0.28;
+      ctx.fillStyle = this.color;
+      ctx.beginPath(); ctx.arc(t.x, t.y, r * frac * 0.7, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+
+    // Low-HP pulse ring (< 30% HP)
+    if (this.hp > 0 && this.hp < this.maxHp * 0.3) {
+      const pulse = 0.3 + 0.3 * Math.abs(Math.sin(Date.now() / 220));
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = '#ff3333';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(this.x, this.y, r + 6, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Main ball
+    ctx.save();
+    if (this.role === 'shadow' && this.phased) ctx.globalAlpha = 0.22;
+    else if (this.role === 'ghost') ctx.globalAlpha = 0.65;
+
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI*2); ctx.fill();
+
+    // Berserker: red rage tint intensifies as HP drops
+    if (this.role === 'berserker') {
+      const rage = 1 - this.hp / this.maxHp;
+      if (rage > 0.05) {
+        ctx.fillStyle = `rgba(255,30,0,${rage * 0.55})`;
+        ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    if (this.hitFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${this.hitFlash * 0.75})`;
+      ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI*2); ctx.fill();
+    }
+    if (this.healFlash > 0) {
+      ctx.fillStyle = `rgba(60,255,120,${this.healFlash * 0.6})`;
+      ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI*2); ctx.fill();
+    }
+
+    // HP number — hidden while Wukong clones are active (forces guessing)
+    const hideHp = this.role === 'wukong' && this.clones.length > 0;
+    if (!hideHp) {
+      const fontSize = Math.max(10, Math.floor(r * 0.58));
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = this.hp > this.maxHp * 0.3 ? '#fff' : '#ff8080';
+      ctx.font = `bold ${fontSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.hp, this.x, this.y);
+    }
+
+    ctx.restore();
+  }
+}
+
+// ── ELASTIC COLLISION ──
+function resolveCollision(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const overlap = (a.radius + b.radius) - dist;
+  if (overlap > 0) {
+    const nx = dx/dist, ny = dy/dist;
+    a.x -= nx*overlap/2; a.y -= ny*overlap/2;
+    b.x += nx*overlap/2; b.y += ny*overlap/2;
+  }
+  const nx = dx/dist, ny = dy/dist;
+  const dot = (a.vx-b.vx)*nx + (a.vy-b.vy)*ny;
+  if (dot <= 0) return;
+  a.vx -= dot*nx; a.vy -= dot*ny;
+  b.vx += dot*nx; b.vy += dot*ny;
+}
+
+// ── PARTICLES ──
+const particles = [];
+function spawnParticles(x, y, color, count = 10) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random()*Math.PI*2, spd = 2+Math.random()*3;
+    particles.push({ x, y, vx: Math.cos(a)*spd, vy: Math.sin(a)*spd, life: 1, color });
+  }
+}
+function tickParticles(dt) {
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.9; p.vy *= 0.9;
+    p.life -= dt/500;
+    if (p.life <= 0) { particles.splice(i,1); continue; }
+    ctx.save();
+    ctx.globalAlpha = p.life * 0.8;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3*p.life, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── SHOCKWAVES ──
+const shockwaves = [];
+function spawnShockwave(x, y, maxR = 55, color = '#fff') {
+  shockwaves.push({ x, y, r: 4, maxR, life: 1, color });
+}
+function tickShockwaves(dt) {
+  for (let i = shockwaves.length-1; i >= 0; i--) {
+    const s = shockwaves[i];
+    s.r += (s.maxR - s.r) * 0.18;
+    s.life -= dt / 350;
+    if (s.life <= 0) { shockwaves.splice(i,1); continue; }
+    ctx.save();
+    ctx.globalAlpha = s.life * 0.5;
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.life * 2.5;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── FLOATING DAMAGE NUMBERS ──
+const damageNumbers = [];
+function spawnDamageNumber(x, y, text, color) {
+  damageNumbers.push({ x, y, text, color, life: 1, vy: -1.2 });
+}
+function tickDamageNumbers(dt) {
+  for (let i = damageNumbers.length-1; i >= 0; i--) {
+    const d = damageNumbers[i];
+    d.y += d.vy;
+    d.vy *= 0.96;
+    d.life -= dt / 750;
+    if (d.life <= 0) { damageNumbers.splice(i,1); continue; }
+    ctx.save();
+    ctx.globalAlpha = d.life;
+    ctx.fillStyle = d.color;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(d.text, d.x, d.y);
+    ctx.restore();
+  }
+}
+
+// ── SCREEN SHAKE ──
+let shakeAmount = 0;
+function triggerShake(amount) { shakeAmount = Math.max(shakeAmount, amount); }
+
+// ── GAME STATE ──
+let ball1, ball2, state, lastTime;
+
+function startGame() {
+  document.getElementById('select-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display  = 'block';
+  ball1 = new Ball(215, 120, '#e74c3c', 'RED',  chosen.red);
+  ball2 = new Ball(645, 360, '#3498db', 'BLUE', chosen.blue);
+  particles.length = 0; shockwaves.length = 0; damageNumbers.length = 0; shakeAmount = 0;
+  state = 'playing'; lastTime = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+function showGameOver(winner) {
+  const el = document.getElementById('winner-text');
+  if (winner) { el.textContent = winner.name + ' WINS!'; el.style.color = winner.color; }
+  else        { el.textContent = 'DRAW!';                el.style.color = '#fff'; }
+  document.getElementById('overlay').classList.add('visible');
+  state = 'gameover';
+}
+
+function startDeathAnim(dead, winner) {
+  let elapsed = 0;
+  const s0 = dead.scale;
+  function step(ts) {
+    const dt = lastTime ? ts - lastTime : 16; lastTime = ts;
+    elapsed += dt;
+    const t = Math.min(elapsed / 500, 1);
+    dead.scale = s0 * (1 - t);
+    shakeAmount *= 0.82;
+    const sx = (Math.random()-0.5)*shakeAmount, sy = (Math.random()-0.5)*shakeAmount;
+    ctx.clearRect(0, 0, W, H);
+    ctx.save(); ctx.translate(sx, sy);
+    winner.draw(ctx); dead.draw(ctx);
+    tickParticles(dt); tickShockwaves(dt); tickDamageNumbers(dt);
+    ctx.restore();
+    if (t < 1) requestAnimationFrame(step);
+    else showGameOver(winner);
+  }
+  requestAnimationFrame(step);
+}
+
+// ── GAME LOOP ──
+function gameLoop(ts) {
+  if (state !== 'playing') return;
+  const dt = lastTime ? ts - lastTime : 16;
+  lastTime = ts;
+
+  ball1.update(ball2, dt);
+  ball2.update(ball1, dt);
+
+  // Ball-ball collision
+  const dist = Math.hypot(ball2.x - ball1.x, ball2.y - ball1.y);
+  if (dist < ball1.radius + ball2.radius) {
+    resolveCollision(ball1, ball2);
+    if (ball1.colCooldown <= 0 && ball2.colCooldown <= 0) {
+      const dmgFrom2 = ball2.role === 'berserker' ? 10 + Math.floor((1 - ball2.hp/ball2.maxHp) * 20) : ball2.colDmg;
+      const dmgFrom1 = ball1.role === 'berserker' ? 10 + Math.floor((1 - ball1.hp/ball1.maxHp) * 20) : ball1.colDmg;
+      ball1.takeDamage(dmgFrom2);
+      ball2.takeDamage(dmgFrom1);
+      if (ball1.role === 'vampire' && ball1.alive) ball1.gainHp(8);
+      if (ball2.role === 'vampire' && ball2.alive) ball2.gainHp(8);
+      ball1.colCooldown = 600; ball2.colCooldown = 600;
+      const mx = (ball1.x+ball2.x)/2, my = (ball1.y+ball2.y)/2;
+      spawnParticles(mx, my, '#fff', 12);
+      spawnShockwave(mx, my, ball1.role === 'tank' || ball2.role === 'tank' ? 70 : 50);
+      triggerShake(ball1.role === 'tank' || ball2.role === 'tank' ? 7 : 3);
+    }
+  }
+
+  // Wukong clone collisions
+  for (const [wuball, opp] of [[ball1, ball2], [ball2, ball1]]) {
+    if (wuball.role !== 'wukong') continue;
+    for (let i = wuball.clones.length - 1; i >= 0; i--) {
+      const c = wuball.clones[i];
+      if (Math.hypot(opp.x - c.x, opp.y - c.y) < opp.radius + wuball.radius) {
+        opp.takeDamage(5);
+        spawnParticles(c.x, c.y, wuball.color, 8);
+        spawnShockwave(c.x, c.y, 35, wuball.color);
+        wuball.clones.splice(i, 1);
+      }
+    }
+  }
+
+  // Screen shake
+  shakeAmount *= 0.82;
+  const sx = (Math.random()-0.5) * shakeAmount;
+  const sy = (Math.random()-0.5) * shakeAmount;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(sx, sy);
+  ball1.draw(ctx); ball2.draw(ctx);
+  tickParticles(dt);
+  tickShockwaves(dt);
+  tickDamageNumbers(dt);
+  ctx.restore();
+
+  // Game over check
+  const b1dead = !ball1.alive, b2dead = !ball2.alive;
+  if (b1dead || b2dead) {
+    state = 'animating';
+    if (b1dead && b2dead) { showGameOver(null); return; }
+    const dead   = b1dead ? ball1 : ball2;
+    const winner = b1dead ? ball2 : ball1;
+    spawnParticles(dead.x, dead.y, dead.color);
+    startDeathAnim(dead, winner);
+    return;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>
